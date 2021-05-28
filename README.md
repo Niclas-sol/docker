@@ -25,15 +25,6 @@ The second option is a `fpm` container. It is based on the [php-fpm](https://hub
 
 [![Try in PWD](https://github.com/play-with-docker/stacks/raw/cff22438cb4195ace27f9b15784bbb497047afa7/assets/images/button.png)](http://play-with-docker.com?stack=https://raw.githubusercontent.com/nextcloud/docker/8db861d67f257a3e9ac1790ea06d4e2a7a193a6c/stack.yml)
 
-## Using the apache image
-The apache image contains a webserver and exposes port 80. To start the container type:
-
-```console
-$ docker run -d -p 8080:80 nextcloud
-```
-
-Now you can access Nextcloud at http://localhost:8080/ from your host system.
-
 
 ## Using the fpm image
 To use the fpm image, you need an additional web server that can proxy http-request to the fpm-port of the container. For fpm connection this container exposes port 9000. In most cases, you might want use another container or your host as proxy. If you use your host you can address your Nextcloud container directly on port 9000. If you use another container, make sure that you add them to the same docker network (via `docker run --network <NAME> ...` or a `docker-compose` file). In both cases you don't want to map the fpm port to your host.
@@ -214,49 +205,6 @@ The easiest way to get a fully featured and functional setup is using a `docker-
 
 At first, make sure you have chosen the right base image (fpm or apache) and added features you wanted (see below). In every case, you would want to add a database container and docker volumes to get easy access to your persistent data. When you want to have your server reachable from the internet, adding HTTPS-encryption is mandatory! See below for more information.
 
-## Base version - apache
-This version will use the apache image and add a mariaDB container. The volumes are set to keep your data persistent. This setup provides **no ssl encryption** and is intended to run behind a proxy.
-
-Make sure to pass in values for `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` variables before you run this setup.
-
-```yaml
-version: '2'
-
-volumes:
-  nextcloud:
-  db:
-
-services:
-  db:
-    image: mariadb
-    restart: always
-    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-    volumes:
-      - db:/var/lib/mysql
-    environment:
-      - MYSQL_ROOT_PASSWORD=
-      - MYSQL_PASSWORD=
-      - MYSQL_DATABASE=nextcloud
-      - MYSQL_USER=nextcloud
-
-  app:
-    image: nextcloud
-    restart: always
-    ports:
-      - 8080:80
-    links:
-      - db
-    volumes:
-      - nextcloud:/var/www/html
-    environment:
-      - MYSQL_PASSWORD=
-      - MYSQL_DATABASE=nextcloud
-      - MYSQL_USER=nextcloud
-      - MYSQL_HOST=db
-
-```
-
-Then run `docker-compose up -d`, now you can access Nextcloud at http://localhost:8080/ from your host system.
 
 ## Base version - FPM
 When using the FPM image, you need another container that acts as web server on port 80 and proxies the requests to the Nextcloud container. In this example a simple nginx container is combined with the Nextcloud-fpm image and a MariaDB database container. The data is stored in docker volumes. The nginx container also needs access to static files from your Nextcloud installation. It gets access to all the volumes mounted to Nextcloud via the `volumes_from` option.The configuration for nginx is stored in the configuration file `nginx.conf`, that is mounted into the container. An example can be found in the examples section [here](https://github.com/nextcloud/docker/tree/master/.examples).
@@ -463,81 +411,3 @@ docker-compose up -d
 ```
 
 The `--pull` option tells docker to look for new versions of the base image. Then the build instructions inside your `Dockerfile` are run on top of the new image.
-
-# Migrating an existing installation
-You're already using Nextcloud and want to switch to docker? Great! Here are some things to look out for:
-
-1. Define your whole Nextcloud infrastructure in a `docker-compose` file and run it with `docker-compose up -d` to get the base installation, volumes and database. Work from there.
-2. Restore your database from a mysqldump (nextcloud\_db\_1 is the name of your db container)
-    - To import from a MySQL dump use the following commands
-    ```console
-    docker cp ./database.dmp nextcloud_db_1:/dmp
-    docker-compose exec db sh -c "mysql -u USER -pPASSWORD nextcloud < /dmp"
-    docker-compose exec db rm /dmp
-    ```
-    - To import from a PostgreSQL dump use to following commands
-    ```console
-    docker cp ./database.dmp nextcloud_db_1:/dmp
-    docker-compose exec db sh -c "psql -U USER --set ON_ERROR_STOP=on nextcloud < /dmp"
-    docker-compose exec db rm /dmp
-    ```
-3. Edit your config.php
-    1. Set database connection
-        - In case of MySQL database
-        ```php
-        'dbhost' => 'db:3306',
-        ```
-        - In case of PostgreSQL database
-        ```php
-        'dbhost' => 'db:5432',
-        ```
-    2. Make sure you have no configuration for the `apps_paths`. Delete lines like these
-        ```diff
-          - 'apps_paths' => array (
-          -     0 => array (
-          -         'path' => OC::$SERVERROOT.'/apps',
-          -         'url' => '/apps',
-          -         'writable' => true,
-          -     ),
-          - ),
-          ```
-    3. Make sure to have the `apps` directory non writable and the `custom_apps` directory writable
-        ```php
-        'apps_paths' => array (
-          0 => array (
-            'path' => '/var/www/html/apps',
-            'url' => '/apps',
-            'writable' => false,
-          ),
-          1 => array (
-            'path' => '/var/www/html/custom_apps',
-            'url' => '/custom_apps',
-            'writable' => true,
-          ),
-        ),
-        ```
-    4. Make sure your data directory is set to /var/www/html/data
-        ```php
-        'datadirectory' => '/var/www/html/data',
-        ```
-4. Copy your data (nextcloud_app_1 is the name of your Nextcloud container):
-    ```console
-    docker cp ./data/ nextcloud_app_1:/var/www/html/
-    docker-compose exec app chown -R www-data:www-data /var/www/html/data
-    docker cp ./theming/ nextcloud_app_1:/var/www/html/
-    docker-compose exec app chown -R www-data:www-data /var/www/html/theming
-    docker cp ./config/config.php nextcloud_app_1:/var/www/html/config
-    docker-compose exec app chown -R www-data:www-data /var/www/html/config
-    ```
-    If you want to preserve the metadata of your files like timestamps, copy the data directly on the host to the named volume using plain `cp` like this:
-    ```console
-    cp --preserve --recursive ./data/ /path/to/nextcloudVolume/data
-    ```
-5. Copy only the custom apps you use (or simply redownload them from the web interface):
-    ```console
-    docker cp ./custom_apps/ nextcloud_data:/var/www/html/
-    docker-compose exec app chown -R www-data:www-data /var/www/html/custom_apps
-    ```
-
-# Questions / Issues
-If you got any questions or problems using the image, please visit our [Github Repository](https://github.com/nextcloud/docker) and write an issue.
